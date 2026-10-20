@@ -512,6 +512,39 @@ fn test_add_to_allowlist_batch_admits_several_addresses() {
 }
 
 #[test]
+fn test_add_to_allowlist_batch_with_already_approved_address() {
+    // A batch mixing a new address with an already-approved one must succeed,
+    // leave the existing record intact, and not duplicate it in the allowlist.
+    let (env, client, admin) = setup();
+    let existing = Address::generate(&env);
+    let fresh = Address::generate(&env);
+    let us = String::from_str(&env, "US");
+    let ke = String::from_str(&env, "KE");
+    client.add_to_allowlist(&admin, &existing, &us, &1000);
+    let before = client.get_record(&existing).unwrap();
+
+    let mut entries: Vec<AllowlistEntry> = Vec::new(&env);
+    entries.push_back(AllowlistEntry {
+        address: fresh.clone(),
+        jurisdiction: ke.clone(),
+        expires_at: 0,
+    });
+    entries.push_back(AllowlistEntry {
+        address: existing.clone(),
+        jurisdiction: us.clone(),
+        expires_at: 1000,
+    });
+
+    client.add_to_allowlist_batch(&admin, &entries);
+
+    assert!(client.is_allowed(&existing));
+    assert!(client.is_allowed(&fresh));
+    assert_eq!(client.get_record(&existing).unwrap(), before);
+    assert_eq!(client.get_record(&fresh).unwrap().jurisdiction, ke);
+    assert_eq!(client.get_allowlist().len(), 2);
+}
+
+#[test]
 #[should_panic(expected = "Error(Contract, #4)")]
 fn test_add_to_allowlist_batch_partial_failure_reverts_whole_batch() {
     // Issue #338: a failure in one entry must not silently skip that entry
