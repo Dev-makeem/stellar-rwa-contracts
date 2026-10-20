@@ -267,6 +267,21 @@ entry has been written via `record_acquisition`, condition 4 is treated as
 satisfied (fail-open). This preserves backwards compatibility for holders
 whose token acquisition pre-dates the holding-period feature.
 
+### Interaction with suspension
+
+The holding-period clock is independent of the KYC lifecycle. `suspend`,
+`reinstate`, and re-approval via `add_to_allowlist` do **not** read or write
+the `FirstAcquiredLedger` entry, so:
+
+- The clock is **not reset** on reinstatement (or on re-approval). The
+  first-acquisition ledger recorded before suspension is kept.
+- Ledgers elapsed **while suspended count toward** `min_holding_period`. A
+  holder suspended for longer than the lock-up window is eligible to transfer
+  immediately after reinstatement, provided their other `is_allowed`
+  conditions pass.
+- A suspended address fails `is_allowed` on condition 1 before the hold check
+  is reached, so no `hldfail` event is emitted during suspension.
+
 ### Burning is unaffected
 
 The asset-token `burn` function does not call `is_allowed`, so a holder
