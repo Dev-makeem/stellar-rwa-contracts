@@ -1278,6 +1278,24 @@ fn test_balances_survive_ttl_boundary() {
     );
 }
 
+// Issue #497: Test that the guardian address survives a TTL boundary.
+#[test]
+fn test_guardian_survives_ttl_boundary() {
+    let s = setup(1_000);
+    let guardian = Address::generate(&s.env);
+    s.token.set_guardian(&s.admin, &Some(guardian.clone()));
+    assert_eq!(s.token.get_metadata().guardian, Some(guardian.clone()));
+
+    // Advance ledger past TTL threshold
+    s.env.ledger().set_sequence_number(500_000);
+
+    assert_eq!(
+        s.token.get_metadata().guardian,
+        Some(guardian),
+        "Guardian must survive TTL boundary"
+    );
+}
+
 // ---- extreme `decimals` documentation test ----
 //
 // `initialize` accepts any `u32` for `decimals` with no upper-bound
