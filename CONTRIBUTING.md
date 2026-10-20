@@ -49,24 +49,30 @@ The build emits a machine-readable interface specification per contract
 (`asset-token`, `compliance`, `dividend`, `registry`) so downstream consumers
 can generate bindings instead of hand-maintaining their view of the interfaces.
 
+The specs are committed in `specs/interface/<contract>.json`. CI regenerates
+them from the built contracts and fails if the committed copies are stale, so
+any change to a public function must come with regenerated specs:
+
 ```bash
-# produce the specs under target/specs/
-make specs
+# regenerate specs/interface/ after changing a public contract function
+make update-interface-specs
+
+# verify the committed specs match the built contracts (what CI runs)
+make check-interface-specs
 ```
 
-Each spec is written to `target/specs/<contract>.json`. CI runs the same target
-and attaches the specs to every workflow run as the `contract-specs` artifact,
-so you can download the exact interfaces for a given commit from the run's
-**Artifacts** section.
+CI also attaches the freshly generated specs to every workflow run as the
+`interface-specs` artifact, so you can download the exact interfaces for a
+given commit from the run's **Artifacts** section.
 
 ### Consuming the specs
 
-Both the web app and the API generate their bindings from the published specs
+Both the web app and the API generate their bindings from the committed specs
 rather than duplicating the interface definitions:
 
 ```bash
-# fetch the specs from a CI run (or build them locally with `make specs`)
-gh run download <run-id> -n contract-specs -D target/specs
+# fetch the specs from a CI run (or use specs/interface/ from the repo)
+gh run download <run-id> -n interface-specs -D target/interface-specs
 
 # generate TypeScript bindings for the web app
 stellar contract bindings typescript \
