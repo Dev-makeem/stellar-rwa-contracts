@@ -357,6 +357,10 @@ impl RegistryContract {
     /// through the full list by incrementing `page` until the returned
     /// `Vec` is shorter than `page_size` (or empty).
     ///
+    /// Order: ascending asset id, i.e. registration order. The index is
+    /// append-only, so the same ids appear in the same order as
+    /// `get_assets_by_issuer` and as `get_all_assets` filtered by issuer.
+    ///
     /// Example — iterate all assets for an issuer in blocks of 50:
     /// ```text
     /// page=0, page_size=50  → first  50 assets (ids[  0.. 49])
@@ -411,6 +415,10 @@ impl RegistryContract {
     /// [`MAX_PAGE_SIZE`]. Page through by incrementing `page` until the
     /// result is shorter than `page_size` (or empty). See
     /// [`get_assets_by_issuer_page`] for a pagination example.
+    ///
+    /// Order: ascending asset id, i.e. registration order. The index is
+    /// append-only, so the same ids appear in the same order as
+    /// `get_assets_by_type` and as `get_all_assets` filtered by type.
     pub fn get_assets_by_type_page(
         env: Env,
         asset_type: String,
