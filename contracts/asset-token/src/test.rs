@@ -522,6 +522,47 @@ fn test_admin_still_pauses_with_guardian_set() {
 }
 
 #[test]
+#[should_panic(expected = "Error(Contract, #3)")]
+fn test_guardian_cannot_propose_admin() {
+    let s = setup(1_000);
+    let guardian = Address::generate(&s.env);
+    let new_admin = Address::generate(&s.env);
+    s.token.set_guardian(&s.admin, &Some(guardian.clone()));
+    s.token.propose_admin(&guardian, &new_admin);
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #3)")]
+fn test_guardian_cannot_set_guardian() {
+    let s = setup(1_000);
+    let guardian = Address::generate(&s.env);
+    s.token.set_guardian(&s.admin, &Some(guardian.clone()));
+    s.token.set_guardian(&guardian, &None);
+}
+
+#[test]
+fn test_admin_retains_all_permissions_with_guardian_set() {
+    let s = setup(1_000);
+    let guardian = Address::generate(&s.env);
+    let bob = Address::generate(&s.env);
+    let new_admin = Address::generate(&s.env);
+    approve(&s.env, &s.compliance, &s.admin, &bob);
+    s.token.set_guardian(&s.admin, &Some(guardian));
+
+    s.token.pause(&s.admin);
+    assert!(s.token.get_metadata().paused);
+    s.token.unpause(&s.admin);
+    assert!(!s.token.get_metadata().paused);
+
+    s.token.mint(&s.admin, &bob, &100);
+    assert_eq!(s.token.balance(&bob), 100);
+
+    s.token.propose_admin(&s.admin, &new_admin);
+    s.token.set_guardian(&s.admin, &None);
+    assert_eq!(s.token.get_metadata().guardian, None);
+}
+
+#[test]
 fn test_update_valuation() {
     let s = setup(1_000);
     // Valuation is local token metadata; a separately registered valuation is
