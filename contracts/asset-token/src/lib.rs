@@ -597,6 +597,10 @@ impl AssetTokenContract {
     /// `expiration_ledger` (inclusive). Passing `amount == 0` clears the
     /// allowance regardless of `expiration_ledger`. (SEP-41)
     ///
+    /// Each call replaces any existing allowance for the same `(from, spender)`
+    /// pair; it does not add to it. The new `amount` and `expiration_ledger`
+    /// fully overwrite the previous values.
+    ///
     /// Paused tokens reject `approve` the same as `transfer`, since an
     /// approval is only meaningful if a matching `transfer_from` could later
     /// succeed (documented in docs/asset-token.md).
