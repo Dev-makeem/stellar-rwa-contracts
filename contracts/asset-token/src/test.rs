@@ -71,6 +71,41 @@ fn test_approve_then_transfer_from() {
 }
 
 #[test]
+fn test_transfer_from_partial_spends_reduce_allowance_exactly() {
+    let s = setup(1_000);
+    let bob = Address::generate(&s.env);
+    let carol = Address::generate(&s.env);
+    approve(&s.env, &s.compliance, &s.admin, &bob);
+    approve(&s.env, &s.compliance, &s.admin, &carol);
+
+    let expiration = s.env.ledger().sequence() + 1_000;
+    s.token.approve(&s.admin, &bob, &300, &expiration);
+
+    s.token.transfer_from(&bob, &s.admin, &carol, &120);
+    assert_eq!(s.token.allowance(&s.admin, &bob), 180);
+
+    s.token.transfer_from(&bob, &s.admin, &carol, &30);
+    assert_eq!(s.token.allowance(&s.admin, &bob), 150);
+}
+
+#[test]
+fn test_transfer_from_full_spend_zeroes_allowance() {
+    let s = setup(1_000);
+    let bob = Address::generate(&s.env);
+    let carol = Address::generate(&s.env);
+    approve(&s.env, &s.compliance, &s.admin, &bob);
+    approve(&s.env, &s.compliance, &s.admin, &carol);
+
+    let expiration = s.env.ledger().sequence() + 1_000;
+    s.token.approve(&s.admin, &bob, &300, &expiration);
+
+    s.token.transfer_from(&bob, &s.admin, &carol, &300);
+    assert_eq!(s.token.allowance(&s.admin, &bob), 0);
+    assert_eq!(s.token.balance(&s.admin), 700);
+    assert_eq!(s.token.balance(&carol), 300);
+}
+
+#[test]
 #[should_panic(expected = "Error(Contract, #13)")]
 fn test_transfer_from_over_allowance_rejected() {
     let s = setup(1_000);
