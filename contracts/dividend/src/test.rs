@@ -1223,6 +1223,31 @@ fn test_reclaim_unclaimed_after_deadline() {
     assert_eq!(d.distributed, d.total_amount);
 }
 
+// Even after the deadline, only the admin may reclaim; a stranger is rejected
+// and the escrow is untouched.
+#[test]
+fn test_reclaim_unclaimed_requires_admin() {
+    let ctx = setup();
+    let deadline = ctx.env.ledger().sequence() + 100;
+    let id = ctx.dividend.create_distribution_deadline(
+        &ctx.admin,
+        &ctx.asset_id,
+        &ctx.pay_id,
+        &1000,
+        &eligible(&ctx),
+        &deadline,
+    );
+    set_ledger_sequence(&ctx.env, deadline + 1);
+    let stranger = Address::generate(&ctx.env);
+
+    assert_eq!(
+        ctx.dividend.try_reclaim_unclaimed(&stranger, &id),
+        Err(Ok(Error::Unauthorized.into()))
+    );
+    assert_eq!(pay_balance(&ctx, &ctx.dividend.address), 1000);
+    assert!(!ctx.dividend.get_distribution(&id).completed);
+}
+
 #[test]
 fn test_withdraw_unclaimed_after_minimum_age_preserves_claims() {
     let ctx = setup();
