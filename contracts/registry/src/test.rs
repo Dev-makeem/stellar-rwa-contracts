@@ -1033,3 +1033,35 @@ fn test_get_active_assets_page_pagination_within_filtered_list() {
     let p3 = client.get_active_assets_page(&5u32, &2u32, &true);
     assert_eq!(p3.len(), 0);
 }
+
+/// A deactivated asset mid-list never appears on any active page, and the
+/// remaining entries still fill pages in order.
+#[test]
+fn test_get_active_assets_page_excludes_deactivated_at_every_page() {
+    let (env, client, admin) = setup();
+    let issuer = Address::generate(&env);
+    let mut ids = Vec::new(&env);
+    for _ in 0..5 {
+        ids.push_back(register(&env, &client, &issuer, "equity", 100));
+    }
+    let removed = ids.get(2).unwrap();
+    client.deactivate_asset(&admin, &removed);
+
+    // 4 active assets remain: pages of 2 cover them exactly.
+    let mut seen = 0u32;
+    for start in [0u32, 2, 4] {
+        let page = client.get_active_assets_page(&start, &2u32, &true);
+        for entry in page.iter() {
+            assert_ne!(entry.id, removed);
+            assert!(entry.active);
+            seen += 1;
+        }
+    }
+    assert_eq!(seen, 4);
+    assert_eq!(client.active_count(), 4);
+
+    // A single oversized page also excludes it and reports the reduced total.
+    let all = client.get_active_assets_page(&0u32, &10u32, &true);
+    assert_eq!(all.len(), 4);
+    assert!(all.iter().all(|e| e.id != removed));
+}
