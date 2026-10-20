@@ -147,6 +147,10 @@ pub enum Error {
     /// An admin withdrawal was attempted before the distribution reached its
     /// required minimum age.
     DistributionTooYoung = 16,
+    /// A distribution was created with a non-zero `deadline` already behind the
+    /// current ledger, so it would be reclaimable immediately with no claim
+    /// window.
+    DeadlineInPast = 17,
 }
 
 const DAY_IN_LEDGERS: u32 = 17_280;
@@ -155,7 +159,7 @@ const INSTANCE_LIFETIME_THRESHOLD: u32 = INSTANCE_BUMP_AMOUNT - DAY_IN_LEDGERS;
 
 /// Contract ABI/behavior version. Bump on any change to storage layout or
 /// externally observable behavior so clients and the indexer can detect it.
-pub const VERSION: u32 = 5;
+pub const VERSION: u32 = 6;
 
 #[contract]
 pub struct DividendContract;
@@ -298,7 +302,9 @@ impl DividendContract {
     ///   non-empty; each balance must be ≥ 0; no address may appear more than
     ///   once.
     /// - `deadline`: Ledger sequence after which claims are rejected.  `0`
-    ///   means no deadline.
+    ///   means no deadline.  A non-zero deadline must be greater than or equal
+    ///   to the current ledger sequence; `deadline == current ledger` is
+    ///   accepted and leaves a one-ledger claim window.
     ///
     /// # Authority
     /// `admin` must be the stored admin and must sign the transaction.
@@ -308,6 +314,8 @@ impl DividendContract {
     /// - [`Error::Unauthorized`] — `admin` does not match the stored admin.
     /// - [`Error::InvalidAmount`] — `total_amount` ≤ 0, `eligible` is empty,
     ///   or any entry's balance is negative.
+    /// - [`Error::DeadlineInPast`] — `deadline != 0` and `deadline` is less
+    ///   than the current ledger sequence.
     /// - [`Error::ZeroSupply`] — `asset_token` reports a zero total supply.
     /// - [`Error::DuplicateHolder`] — the same address appears more than once
     ///   in `eligible`.
@@ -328,6 +336,13 @@ impl DividendContract {
         Self::require_admin_or_asset_admin(&env, &admin, &asset_token);
         if total_amount <= 0 {
             panic_err(&env, Error::InvalidAmount);
+        }
+        // Reject a deadline already behind the current ledger: the distribution
+        // would be reclaimable immediately with no claim window (issue #489).
+        // `deadline == current ledger` is allowed, matching `claim`'s inclusive
+        // `sequence() > deadline` cutoff.
+        if deadline != 0 && deadline < env.ledger().sequence() {
+            panic_err(&env, Error::DeadlineInPast);
         }
         // Reject distributions where no holder can ever claim (issue #49).
         let supply = AssetClient::new(&env, &asset_token).total_supply();
