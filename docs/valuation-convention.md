@@ -30,12 +30,18 @@ All queries return cents. Convert on client side if needed.
 
 ## Token and Registry Consistency
 
-The asset token and registry store separate valuation fields. Registering an
-asset copies the supplied valuation into the registry, but the registry does
-not observe `asset-token::update_valuation`. Updating the token metadata can
-therefore leave the registry entry and TVL stale. Divergence is possible until
-the registry gains a valuation-update workflow; clients and operators must
-verify both records and coordinate any separate registry correction.
+The asset token and registry store separate valuation fields, and they are
+intentionally independent (not kept in sync automatically):
+
+- `registry::register_asset` copies the supplied valuation into the registry
+  entry and TVL. After that, only `registry::update_valuation` changes it.
+- `asset-token::update_valuation` changes only the token metadata. It does not
+  call the registry, so the registry entry and TVL can go stale.
+
+The two `update_valuation` entrypoints are separate admin actions, each with
+its own authority. Whoever changes a token's valuation must also call
+`registry::update_valuation` for the matching asset id if the registry should
+reflect it. Clients and operators must verify both records.
 
 ## In Documentation
 
