@@ -43,6 +43,26 @@ cargo test -p compliance
 > cargo update -p ed25519-dalek@3.0.0 --precise 2.2.0
 > ```
 
+## Fuzzing
+
+The fuzz targets live in `fuzz/fuzz_targets/` and are separate from the
+workspace. Full details are in [FUZZING.md](FUZZING.md).
+
+The batch allowlist target (issue #492) drives `add_to_allowlist_batch` with
+generated batches of valid and invalid entries (jurisdiction and expiry) and
+checks that a batch reverts as a whole, that the allowlist counter matches the
+list, and that every admitted address passes `is_allowed`:
+
+```bash
+cd fuzz
+cargo run --bin compliance_batch_allowlist
+```
+
+Other compliance targets (`compliance_expiry`, `compliance_jurisdiction_race`,
+`compliance_is_allowed`) run the same way with their binary name. To add a
+target, create a file under `fuzz/fuzz_targets/`, register it as a `[[bin]]` in
+`fuzz/Cargo.toml`, and list it in [FUZZING.md](FUZZING.md).
+
 ## Contract interface specs
 
 The build emits a machine-readable interface specification per contract
