@@ -20,9 +20,12 @@ BASE="${1:?usage: check_changelog.sh <base-ref> [head-ref]}"
 HEAD="${2:-HEAD}"
 CHANGELOG=CHANGELOG.md
 
-# A behaviour change is a contract source or manifest edit. `src/test.rs` and
-# `test_snapshots/**` are deliberately excluded.
-CONTRACT_CHANGE_RE='^contracts/[^/]+/(src/lib\.rs|Cargo\.toml)$'
+# A behaviour change is a contract source or manifest edit. Any file under
+# `src/` counts so that entry points moved into modules are still caught.
+# `src/test.rs` and `src/test/**` are deliberately excluded, as is
+# `test_snapshots/**`, which sits outside `src/`.
+CONTRACT_CHANGE_RE='^contracts/[^/]+/(src/.+\.rs|Cargo\.toml)$'
+CONTRACT_TEST_RE='^contracts/[^/]+/src/test(/|\.rs$)'
 
 # Non-blank lines under `## [Unreleased]`, stopping at the next `## ` heading.
 count_unreleased() {
@@ -33,7 +36,7 @@ count_unreleased() {
 changed="$(git diff --name-only "$BASE...$HEAD")"
 printf 'Changed files:\n%s\n' "$changed"
 
-triggers="$(printf '%s\n' "$changed" | grep -E "$CONTRACT_CHANGE_RE" || true)"
+triggers="$(printf '%s\n' "$changed" | grep -E "$CONTRACT_CHANGE_RE" | grep -vE "$CONTRACT_TEST_RE" || true)"
 if [ -z "$triggers" ]; then
   echo "No contract source or manifest changes; a CHANGELOG entry is not required."
   exit 0
@@ -46,11 +49,13 @@ if ! git cat-file -e "$BASE:$CHANGELOG" 2>/dev/null; then
 fi
 
 base_copy="$(mktemp)"
-trap 'rm -f "$base_copy"' EXIT
+head_copy="$(mktemp)"
+trap 'rm -f "$base_copy" "$head_copy"' EXIT
 git show "$BASE:$CHANGELOG" >"$base_copy"
+git show "$HEAD:$CHANGELOG" >"$head_copy"
 
 before="$(count_unreleased "$base_copy")"
-after="$(count_unreleased "$CHANGELOG")"
+after="$(count_unreleased "$head_copy")"
 
 if [ "$after" -le "$before" ]; then
   cat >&2 <<EOF
