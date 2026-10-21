@@ -103,7 +103,8 @@ distribution flow.
   The role does not move yet.
 - `accept_admin(new_admin)` — pending successor's auth; completes the handover.
 - `cancel_admin_proposal(admin)` — admin auth; clears the pending successor.
-  See [issue #4](fixes/issue-4.md) for the rationale.
+  See [issue #4](fixes/issue-4.md) for the rationale and the
+  [CLI handover walkthrough](admin-handover.md).
 
 ## Swapping compliance mid-life
 

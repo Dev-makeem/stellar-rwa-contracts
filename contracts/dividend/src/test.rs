@@ -854,6 +854,24 @@ fn test_propose_accept_admin_moves_role_only_on_acceptance() {
 }
 
 #[test]
+fn test_propose_admin_overwrites_pending_successor() {
+    let ctx = setup();
+    let first = Address::generate(&ctx.env);
+    let second = Address::generate(&ctx.env);
+
+    ctx.dividend.propose_admin(&ctx.admin, &first);
+    ctx.dividend.propose_admin(&ctx.admin, &second);
+
+    assert_eq!(ctx.dividend.get_pending_admin(), Some(second.clone()));
+    assert_eq!(
+        ctx.dividend.try_accept_admin(&first),
+        Err(Ok(Error::Unauthorized.into()))
+    );
+    ctx.dividend.accept_admin(&second);
+    assert_eq!(ctx.dividend.get_admin(), second);
+}
+
+#[test]
 fn test_cancel_admin_proposal_by_current_admin() {
     let ctx = setup();
     let successor = Address::generate(&ctx.env);

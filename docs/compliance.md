@@ -135,7 +135,7 @@ The configured admin. Errors: `NotInitialized (#2)`.
 Two-step admin handover: the **current** admin proposes a successor, and the
 role moves only when that successor calls `accept_admin` (proving it controls
 the address). The current admin can cancel a pending proposal. See
-[issue #4](fixes/issue-4.md).
+[issue #4](fixes/issue-4.md) and the [CLI handover walkthrough](admin-handover.md).
 
 ### `set_min_holding_period(admin, holder, min_ledgers: u64)`
 Set or clear a per-address minimum holding period (issue #454). Admin only.
