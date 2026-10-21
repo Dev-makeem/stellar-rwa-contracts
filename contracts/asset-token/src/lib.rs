@@ -668,6 +668,11 @@ impl AssetTokenContract {
     /// Subject to the same pause and compliance gates as [`Self::transfer`].
     /// (SEP-41)
     ///
+    /// Both `from` (the approval owner) and `to` are checked against the
+    /// compliance contract before the allowance or any balance is touched, so
+    /// an approval can never be used to route funds to an unapproved recipient.
+    /// The `spender` itself only moves funds it was allowed and is not checked.
+    ///
     /// # Parameters
     /// - `spender`: Address exercising the allowance.  Must authorize the call.
     /// - `from`: Token owner.  Must be compliance-approved.
