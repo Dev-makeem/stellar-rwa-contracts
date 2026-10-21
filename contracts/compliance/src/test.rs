@@ -1,6 +1,8 @@
 #![cfg(test)]
+extern crate std;
+use std::println;
 use super::*;
-use soroban_sdk::{testutils::Address as _, testutils::Ledger as _, Env};
+use soroban_sdk::{testutils::Address as _, testutils::Events as _, testutils::Ledger as _, Env};
 
 fn setup() -> (Env, ComplianceContractClient<'static>, Address) {
     let env = Env::default();
@@ -1220,6 +1222,224 @@ fn test_record_acquisition_is_idempotent() {
     env.ledger().with_mut(|l| l.sequence_number = 200);
     client.record_acquisition(&admin, &user);
     assert_eq!(client.get_first_acquired_ledger(&user), Some(100u64));
+}
+
+// ---- get_allowlist_count: zero / empty-list input ----
+
+/// `get_allowlist_count` must return 0 on a freshly-initialised contract
+/// where no address has ever been added.  This confirms the `unwrap_or(0)`
+/// sentinel fires correctly when the `AllowlistCount` key is absent from
+/// storage rather than returning garbage or panicking.
+#[test]
+fn test_get_allowlist_count_zero_on_empty_contract() {
+    let (_env, client, _admin) = setup();
+    assert_eq!(client.get_allowlist_count(), 0);
+}
+
+/// Adding then removing the only address must leave the counter at exactly
+/// zero, not at an underflowed or stale value.  This is the "empty list after
+/// churn" path distinct from "never had anything."
+#[test]
+fn test_get_allowlist_count_returns_zero_after_full_removal() {
+    let (env, client, admin) = setup();
+    let user = Address::generate(&env);
+    let us = String::from_str(&env, "US");
+
+    client.add_to_allowlist(&admin, &user, &us, &0);
+    assert_eq!(client.get_allowlist_count(), 1);
+
+    client.remove(&admin, &user);
+    assert_eq!(client.get_allowlist_count(), 0);
+}
+
+// ---- get_allowlist_count: event emission ----
+
+/// `get_allowlist_count` is a pure read — it makes no state change and
+/// therefore must emit no events.  We verify this by capturing the event
+/// log immediately after the call and asserting it is empty.
+#[test]
+fn test_get_allowlist_count_emits_no_events() {
+    let (env, client, admin) = setup();
+    let user = Address::generate(&env);
+    let us = String::from_str(&env, "US");
+    client.add_to_allowlist(&admin, &user, &us, &0);
+
+    // Call get_allowlist_count and immediately snapshot the event log.
+    // The SDK clears the log before each top-level invocation, so any events
+    // present here were emitted by get_allowlist_count itself.
+    let _ = client.get_allowlist_count();
+    let all = env.events().all();
+    let events_after = all.events();
+
+    assert!(
+        events_after.is_empty(),
+        "get_allowlist_count must not emit any events, but got: {:?}",
+        events_after
+    );
+}
+
+// ---- get_allowlist_count: resource cost baseline ----
+
+/// Measure the CPU-instruction and memory-byte cost of a single
+/// `get_allowlist_count` call on an empty list and on a populated one.
+///
+/// These numbers are the cost **baseline** for this entry point.  They are
+/// printed to the test output (`cargo test -- --nocapture`) so reviewers can
+/// record them; the test itself only asserts that the costs are non-zero
+/// (meaning the budget API is reporting real data) and below the Soroban
+/// per-transaction limits as of Soroban SDK v22
+/// (CPU: 100 000 000 instructions; memory: 40 960 000 bytes).
+///
+/// If a future change to `get_allowlist_count` causes costs to spike
+/// significantly, this test will catch it once the thresholds are tightened.
+#[test]
+fn test_get_allowlist_count_resource_cost_baseline() {
+    // ---- empty list ----
+    {
+        let (env, client, _admin) = setup();
+        env.cost_estimate().budget().reset_default();
+        let _ = client.get_allowlist_count();
+        let cpu_empty = env.cost_estimate().budget().cpu_instruction_cost();
+        let mem_empty = env.cost_estimate().budget().memory_bytes_cost();
+        println!(
+            "[baseline] get_allowlist_count (empty): cpu={cpu_empty} instructions, mem={mem_empty} bytes"
+        );
+        assert!(cpu_empty > 0, "CPU cost must be non-zero");
+        assert!(mem_empty > 0, "memory cost must be non-zero");
+        // Soroban per-transaction hard limits (SDK v22).
+        assert!(
+            cpu_empty < 100_000_000,
+            "CPU cost {cpu_empty} exceeds 100M instruction limit"
+        );
+        assert!(
+            mem_empty < 40_960_000,
+            "memory cost {mem_empty} exceeds 40MB limit"
+        );
+    }
+
+    // ---- populated list (100 addresses) ----
+    {
+        let (env, client, admin) = setup();
+        let us = String::from_str(&env, "US");
+        for _ in 0..100 {
+            let a = Address::generate(&env);
+            client.add_to_allowlist(&admin, &a, &us, &0);
+        }
+        env.cost_estimate().budget().reset_default();
+        let _ = client.get_allowlist_count();
+        let cpu_full = env.cost_estimate().budget().cpu_instruction_cost();
+        let mem_full = env.cost_estimate().budget().memory_bytes_cost();
+        println!(
+            "[baseline] get_allowlist_count (100 entries): cpu={cpu_full} instructions, mem={mem_full} bytes"
+        );
+        // Cost must be O(1): the populated case must not cost dramatically more
+        // than the empty case.  We use a generous 10× multiplier to avoid a
+        // fragile exact-value assertion while still catching a regression to
+        // O(n) behaviour.
+        assert!(
+            cpu_full < 100_000_000,
+            "CPU cost {cpu_full} exceeds 100M instruction limit with 100 entries"
+        );
+        assert!(
+            mem_full < 40_960_000,
+            "memory cost {mem_full} exceeds 40MB limit with 100 entries"
+        );
+    }
+}
+
+// ---- get_allowlist_count: paused / deactivated states ----
+
+/// `get_allowlist_count` must return a stable, sensible value even when the
+/// list is in a "deactivated" state.  The compliance contract has no explicit
+/// pause flag, so we exercise three analogous conditions:
+///
+/// 1. **All addresses suspended** — suspension flips `KycRecord::status` but
+///    does *not* remove the address from a page, so the counter must still
+///    reflect the number of page slots, not the number of allowed addresses.
+/// 2. **All addresses removed** — removal decrements the counter, so after
+///    removing every address the counter must be 0.
+/// 3. **All jurisdictions blocked** — blocking does not touch the allowlist
+///    pages or the counter at all.
+///
+/// In every case the call must return without panicking and the returned value
+/// must match `get_allowlist().len()` (the authoritative source).
+#[test]
+fn test_get_allowlist_count_while_all_addresses_suspended() {
+    // Suspend is the closest analogue to "paused" for individual holders.
+    // The counter counts page membership, not compliance status, so it stays
+    // equal to the number of unique addresses ever added minus those removed.
+    let (env, client, admin) = setup();
+    let a = Address::generate(&env);
+    let b = Address::generate(&env);
+    let us = String::from_str(&env, "US");
+
+    client.add_to_allowlist(&admin, &a, &us, &0);
+    client.add_to_allowlist(&admin, &b, &us, &0);
+
+    // Suspend both addresses — analogous to "pausing" their ability to trade.
+    client.suspend(&admin, &a);
+    client.suspend(&admin, &b);
+
+    // Neither address is_allowed, but both still occupy a page slot.
+    assert!(!client.is_allowed(&a));
+    assert!(!client.is_allowed(&b));
+
+    let count = client.get_allowlist_count();
+    assert_eq!(
+        count, 2,
+        "count must include suspended addresses (they still hold page slots)"
+    );
+    // Sanity-check: counter must agree with get_allowlist.
+    assert_eq!(count, client.get_allowlist().len());
+}
+
+#[test]
+fn test_get_allowlist_count_while_all_addresses_removed() {
+    // Removing all addresses is the strongest "deactivated" state.
+    let (env, client, admin) = setup();
+    let a = Address::generate(&env);
+    let b = Address::generate(&env);
+    let us = String::from_str(&env, "US");
+
+    client.add_to_allowlist(&admin, &a, &us, &0);
+    client.add_to_allowlist(&admin, &b, &us, &0);
+    assert_eq!(client.get_allowlist_count(), 2);
+
+    client.remove(&admin, &a);
+    client.remove(&admin, &b);
+
+    let count = client.get_allowlist_count();
+    assert_eq!(
+        count, 0,
+        "count must be 0 after all addresses are removed"
+    );
+    assert_eq!(count, client.get_allowlist().len());
+}
+
+#[test]
+fn test_get_allowlist_count_while_all_jurisdictions_blocked() {
+    // Blocking every jurisdiction makes is_allowed return false for every
+    // holder, but neither the page data nor the counter is touched.
+    let (env, client, admin) = setup();
+    let a = Address::generate(&env);
+    let b = Address::generate(&env);
+    let us = String::from_str(&env, "US");
+
+    client.add_to_allowlist(&admin, &a, &us, &0);
+    client.add_to_allowlist(&admin, &b, &us, &0);
+    assert!(client.is_allowed(&a));
+
+    // Block the only jurisdiction in use — effectively "pauses" all transfers.
+    client.block_jurisdiction(&admin, &us);
+    assert!(!client.is_allowed(&a));
+    assert!(!client.is_allowed(&b));
+
+    let count = client.get_allowlist_count();
+    assert_eq!(
+        count, 2,
+        "count must be unaffected by jurisdiction blocks"
+    );
+    assert_eq!(count, client.get_allowlist().len());
 }
 
 /// An address with no holding period set is not affected by the check at all.

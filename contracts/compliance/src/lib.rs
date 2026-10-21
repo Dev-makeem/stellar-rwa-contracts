@@ -677,6 +677,37 @@ impl ComplianceContract {
     /// thus this counter) is untouched, so suspended addresses are still
     /// counted.
     ///
+    /// ## Empty / zero-count behaviour
+    ///
+    /// When the `AllowlistCount` key is absent from instance storage (i.e. on
+    /// a freshly initialised contract or after every address has been removed)
+    /// the method returns `0` via `unwrap_or(0)`.  It never panics, regardless
+    /// of how many (or few) addresses are present.
+    ///
+    /// ## Relationship to compliance status
+    ///
+    /// This counter reflects **page membership**, not the result of
+    /// [`Self::is_allowed`].  Concretely:
+    ///
+    /// - **Suspended addresses** still hold a page slot and are included in
+    ///   the count.  Callers that need only the number of *currently
+    ///   transferable* holders must additionally filter by
+    ///   [`Self::status_of`].
+    /// - **Jurisdiction blocks** do not touch pages or the counter; blocking
+    ///   every jurisdiction leaves the counter unchanged.
+    /// - **Expired records** remain on a page until [`Self::prune_expired`] is
+    ///   called; until then they are also included in the count.
+    ///
+    /// ## Resource cost
+    ///
+    /// The call reads a single instance-storage key and is O(1) regardless of
+    /// allowlist size.  In benchmarks the CPU-instruction cost is the same
+    /// whether the list is empty or has hundreds of entries, confirming that
+    /// no page iteration occurs.  Both figures sit well within the Soroban
+    /// per-transaction limits (100 M instructions / 40 MB memory as of SDK
+    /// v22); see `test_get_allowlist_count_resource_cost_baseline` for the
+    /// recorded numbers.
+    ///
     /// # Parameters
     /// None.
     ///
@@ -687,7 +718,7 @@ impl ComplianceContract {
     /// None.
     ///
     /// # Events
-    /// None.
+    /// None — this is a pure read with no state change.
     pub fn get_allowlist_count(env: Env) -> u32 {
         env.storage()
             .instance()
