@@ -580,6 +580,38 @@ fn test_reactivate_asset_restores_tvl_and_active_count() {
 }
 
 #[test]
+fn test_reactivate_asset_restores_visibility_in_active_views() {
+    // A deactivate/reactivate round trip must put the asset back in every
+    // active view and leave its stored data untouched.
+    let (env, client, admin) = setup();
+    let issuer = Address::generate(&env);
+    let _a = register(&env, &client, &issuer, "bond", 100);
+    let b = register(&env, &client, &issuer, "invoice", 250);
+    let _c = register(&env, &client, &issuer, "bond", 50);
+    let before = client.get_asset(&b);
+
+    client.deactivate_asset(&admin, &b);
+    let active = client.get_active_assets_page(&0u32, &10u32, &true);
+    assert_eq!(active.len(), 2);
+    assert!(active.iter().all(|e| e.id != b));
+    let inactive = client.get_active_assets_page(&0u32, &10u32, &false);
+    assert_eq!(inactive.len(), 1);
+    assert_eq!(inactive.get(0).unwrap().id, b);
+
+    client.reactivate_asset(&admin, &b);
+    let active = client.get_active_assets_page(&0u32, &10u32, &true);
+    assert_eq!(active.len(), 3);
+    assert_eq!(active.get(1).unwrap().id, b);
+    assert_eq!(client.get_active_assets_page(&0u32, &10u32, &false).len(), 0);
+    assert_eq!(client.active_count(), 3);
+    assert_eq!(client.total_value_locked(), 400);
+
+    // Data is unchanged by the round trip.
+    assert_eq!(client.get_asset(&b), before);
+    assert_eq!(active.get(1).unwrap(), before);
+}
+
+#[test]
 fn test_reactivate_already_active_asset_is_noop() {
     let (env, client, admin) = setup();
     let issuer = Address::generate(&env);
