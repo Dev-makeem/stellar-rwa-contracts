@@ -1048,6 +1048,29 @@ fn test_get_allowlist_page_offset_and_limit() {
 }
 
 #[test]
+fn test_get_allowlist_page_straddles_end_of_list() {
+    let (env, client, admin) = setup();
+    let us = String::from_str(&env, "US");
+    let mut addrs: Vec<Address> = Vec::new(&env);
+    for _ in 0..5 {
+        let a = Address::generate(&env);
+        client.add_to_allowlist(&admin, &a, &us, &0);
+        addrs.push_back(a);
+    }
+
+    // Requested page (offset 3, limit 4) runs past the end: only the 2-item
+    // remainder comes back, in order.
+    let tail = client.get_allowlist_page(&3, &4);
+    assert_eq!(tail.len(), 2);
+    assert_eq!(tail.get(0).unwrap(), addrs.get(3).unwrap());
+    assert_eq!(tail.get(1).unwrap(), addrs.get(4).unwrap());
+
+    // Offsets at or far beyond the end return empty rather than erroring.
+    assert_eq!(client.get_allowlist_page(&5, &4).len(), 0);
+    assert_eq!(client.get_allowlist_page(&1000, &4).len(), 0);
+}
+
+#[test]
 fn test_get_allowlist_page_limit_clamped_to_max() {
     let (env, client, admin) = setup();
     let us = String::from_str(&env, "US");
