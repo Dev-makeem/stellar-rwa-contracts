@@ -307,7 +307,28 @@ Listing of the contract `DataKey` variants and their storage behaviour.
 | `Blocked` | String | persistent | existence flag per jurisdiction |
 | `BlockedList` | - | instance | ordered `Vec<String>` backing `get_blocked_jurisdictions` |
 | `MinHoldingPeriod` | Address | persistent | per-key TTL; absent when no holding period set |
-| `FirstAcquiredLedger` | Address | persistent | per-key TTL; written once by `record_acquisition` |
+| `FirstAcquiredLedger` | Address | persistent | per-key TTL; written once by `record_acquisition`; bumped only on that first write (see below) |
+
+### `FirstAcquiredLedger` TTL bump strategy (issue #496)
+
+- **Bump site:** `record_acquisition` in `contracts/compliance/src/lib.rs`.
+  The `extend_ttl` call on `FirstAcquiredLedger` sits inside the first-write
+  branch (`if !env.storage().persistent().has(&key)`), so it runs once when the
+  entry is created, extending it to `INSTANCE_BUMP_AMOUNT` (30 days of ledgers).
+- **Not bumped on later calls:** a repeat `record_acquisition` for the same
+  holder takes the no-op path and does not extend TTL. `is_allowed` and
+  `get_first_acquired_ledger` read the entry without bumping it.
+- **Consequence:** the entry expires about 30 days after the first acquisition
+  is recorded, regardless of the holding period. Once archived, `is_allowed`
+  sees no record and fails open, so the lock-up is silently lifted. Keeping the
+  record alive past that point requires a bump that the contract does not
+  currently perform.
+- `MinHoldingPeriod` is bumped on every `set_min_holding_period` call with a
+  non-zero value, so it is refreshed by admin action only.
+- `scripts/generate_storage_docs.py` cannot see this bump. It only matches
+  `DataKey::X` inside the call, while the contract passes a local `key`
+  variable, so regenerating the section marks `FirstAcquiredLedger` as
+  `unknown` with no TTL note. Re-apply this section by hand after running it.
 
 ## Admin independence from the asset-token admin (issue #3)
 
