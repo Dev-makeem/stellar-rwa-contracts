@@ -85,6 +85,9 @@ any caller — no auth gate, no privileged check:
 | `unpause` | Admin | `Error::Unauthorized` (#3) |
 | `update_valuation` | Admin | `Error::Unauthorized` (#3) |
 | `set_compliance` | Admin | `Error::Unauthorized` (#3) |
+| `propose_admin` | Admin | `Error::Unauthorized` (#3) |
+| `cancel_admin_proposal` | Admin | `Error::Unauthorized` (#3); `Error::NoPendingAdmin` (#12) if no proposal |
+| `accept_admin` | Pending admin (self) | `Error::Unauthorized` (#3) if not the proposed successor; `Error::NoPendingAdmin` (#12) if no proposal |
 
 ## dividend (`contracts/dividend`)
 
@@ -94,6 +97,9 @@ any caller — no auth gate, no privileged check:
 | `create_distribution` | Admin | `Error::Unauthorized` (#3) |
 | `claim` | Self (the `holder` address) | `require_auth` failure if `holder` did not authorize; separately reverts with `Error::AlreadyClaimed` (#7) / `Error::NothingToClaim` (#6) on business-rule failure |
 | `withdraw_unclaimed` | Admin | `Error::Unauthorized` (#3); `Error::DistributionTooYoung` (#16) before the requested minimum age; `Error::DeadlineNotReached` (#14) before a configured claim deadline; `Error::NothingToClaim` (#6) if no withdrawable balance remains |
+| `propose_admin` | Admin | `Error::Unauthorized` (#3) |
+| `cancel_admin_proposal` | Admin | `Error::Unauthorized` (#3); `Error::NoPendingAdmin` (#12) if no proposal |
+| `accept_admin` | Pending admin (self) | `Error::Unauthorized` (#3) if not the proposed successor; `Error::NoPendingAdmin` (#12) if no proposal |
 
 ## registry (`contracts/registry`)
 
@@ -102,6 +108,9 @@ any caller — no auth gate, no privileged check:
 | `initialize` | None (bootstrap) — but only succeeds once | Second call panics `Error::AlreadyInitialized` (#1) |
 | `register_asset` | Self (the `issuer` address) | `require_auth` failure if `issuer` did not authorize |
 | `deactivate_asset` | Admin | `Error::Unauthorized` (#3) |
+| `propose_admin` | Admin | `Error::Unauthorized` (#3) |
+| `cancel_admin_proposal` | Admin | `Error::Unauthorized` (#3); `Error::NoPendingAdmin` (#8) if no proposal |
+| `accept_admin` | Pending admin (self) | `Error::Unauthorized` (#3) if not the proposed successor; `Error::NoPendingAdmin` (#8) if no proposal |
 
 ## Cross-contract trust
 
