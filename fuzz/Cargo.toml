@@ -37,3 +37,7 @@ path = "fuzz_targets/compliance_jurisdiction_race.rs"
 [[bin]]
 name = "compliance_is_allowed"
 path = "fuzz_targets/compliance_is_allowed.rs"
+
+[[bin]]
+name = "asset_token_transfer_batch"
+path = "fuzz_targets/asset_token_transfer_batch.rs"
