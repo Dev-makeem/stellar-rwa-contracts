@@ -388,6 +388,11 @@ impl ComplianceContract {
     /// the address is re-approved (via [`Self::add_to_allowlist`]) or
     /// reinstated (via [`Self::reinstate`]).
     ///
+    /// Suspension does not touch the holder's first-acquisition ledger
+    /// (issue #454): time spent suspended counts toward any minimum holding
+    /// period, so a holder whose lock-up has elapsed while suspended is
+    /// eligible again as soon as they are reinstated.
+    ///
     /// # Parameters
     /// - `admin`: Current admin address.  Must authorize the call.
     /// - `address`: Address to suspend.  Must already have a KYC record.
@@ -421,6 +426,9 @@ impl ComplianceContract {
     /// caller to resupply `jurisdiction`/`expires_at` and overwrites
     /// `verified_at`), `reinstate` flips the status back to `Approved` and
     /// leaves `jurisdiction`, `verified_at` and `expires_at` untouched.
+    ///
+    /// The holder's first-acquisition ledger is also left untouched, so the
+    /// minimum holding period (issue #454) is not restarted by reinstatement.
     ///
     /// # Parameters
     /// - `admin`: Current admin address.  Must authorize the call.
