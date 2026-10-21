@@ -619,7 +619,7 @@ impl DividendContract {
     /// - [`Error::DeadlineNotReached`] — `current_ledger <= deadline`;
     ///   the deadline has not yet passed.
     /// - [`Error::NothingToClaim`] — all funds were already claimed or
-    ///   reclaimed.
+    ///   reclaimed, or the distribution was cancelled (`completed == true`).
     ///
     /// # Events
     /// Emits topic `("reclaim", admin)` with data `(distribution_id, remaining)`.
@@ -631,6 +631,12 @@ impl DividendContract {
         }
         if env.ledger().sequence() <= dist.deadline {
             panic_err(&env, Error::DeadlineNotReached);
+        }
+        // A cancelled or already-reclaimed distribution has `distributed == 0`
+        // (cancel) or is completed; without this guard the escrow would be
+        // returned to the admin a second time.
+        if dist.completed {
+            panic_err(&env, Error::NothingToClaim);
         }
         let remaining = dist.total_amount - dist.distributed;
         if remaining <= 0 {
@@ -684,6 +690,8 @@ impl DividendContract {
     ///   `distribution_id` exists.
     /// - [`Error::InvalidAmount`] — at least one claim has already been
     ///   processed (`distributed > 0`); cancellation is not allowed.
+    /// - [`Error::NothingToClaim`] — the distribution is already completed
+    ///   (cancelled or reclaimed); its escrow has already been returned.
     ///
     /// # Events
     /// Emits topic `("cancel", admin)` with data `distribution_id`.
@@ -693,6 +701,11 @@ impl DividendContract {
         // Only allow cancellation before any claim is made (issue #366).
         if dist.distributed > 0 {
             panic_err(&env, Error::InvalidAmount);
+        }
+        // Already cancelled (or reclaimed): the escrow has been returned, so a
+        // second cancel must not transfer it again.
+        if dist.completed {
+            panic_err(&env, Error::NothingToClaim);
         }
         // Return escrowed funds to the issuer.
         let this = env.current_contract_address();
