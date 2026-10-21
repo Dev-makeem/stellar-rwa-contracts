@@ -548,6 +548,29 @@ fn test_cleared_guardian_loses_pause_rights() {
 }
 
 #[test]
+#[should_panic(expected = "Error(Contract, #3)")]
+fn test_replaced_guardian_loses_pause_rights() {
+    let s = setup(1_000);
+    let old_guardian = Address::generate(&s.env);
+    let new_guardian = Address::generate(&s.env);
+    s.token.set_guardian(&s.admin, &Some(old_guardian.clone()));
+    s.token.set_guardian(&s.admin, &Some(new_guardian.clone()));
+    assert_eq!(s.token.get_metadata().guardian, Some(new_guardian));
+    s.token.pause(&old_guardian);
+}
+
+#[test]
+fn test_replacement_guardian_can_pause() {
+    let s = setup(1_000);
+    let old_guardian = Address::generate(&s.env);
+    let new_guardian = Address::generate(&s.env);
+    s.token.set_guardian(&s.admin, &Some(old_guardian));
+    s.token.set_guardian(&s.admin, &Some(new_guardian.clone()));
+    s.token.pause(&new_guardian);
+    assert!(s.token.get_metadata().paused);
+}
+
+#[test]
 fn test_admin_still_pauses_with_guardian_set() {
     let s = setup(1_000);
     let guardian = Address::generate(&s.env);
