@@ -153,3 +153,41 @@ fn approve_overwrite_cost_not_greater_than_double_first() {
     let second = s.env.cost_estimate().budget().cpu_instruction_cost();
     assert!(second <= first * 2, "overwrite cost {second} vs first {first}");
 }
+
+// ---- #535: paused state ----
+// The contract has no separate "deactivated" state; `paused` is the only
+// gate and it is checked by `approve`.
+
+#[test]
+fn approve_rejected_while_paused() {
+    let s = setup();
+    let spender = Address::generate(&s.env);
+    s.token.pause(&s.admin);
+    let exp = s.env.ledger().sequence() + 100;
+    assert!(s.token.try_approve(&s.admin, &spender, &10, &exp).is_err());
+    assert_eq!(s.token.allowance(&s.admin, &spender), 0);
+}
+
+#[test]
+fn zero_approve_also_rejected_while_paused() {
+    // Current behaviour: the pause check precedes the zero-amount path, so
+    // an owner cannot revoke an allowance while paused.
+    let s = setup();
+    let spender = Address::generate(&s.env);
+    let exp = s.env.ledger().sequence() + 100;
+    s.token.approve(&s.admin, &spender, &10, &exp);
+    s.token.pause(&s.admin);
+    assert!(s.token.try_approve(&s.admin, &spender, &0, &exp).is_err());
+    assert_eq!(s.token.allowance(&s.admin, &spender), 10);
+}
+
+#[test]
+fn approve_works_again_after_unpause() {
+    let s = setup();
+    let spender = Address::generate(&s.env);
+    s.token.pause(&s.admin);
+    s.token.unpause(&s.admin);
+    let exp = s.env.ledger().sequence() + 100;
+    s.token.approve(&s.admin, &spender, &10, &exp);
+    assert_eq!(s.token.allowance(&s.admin, &spender), 10);
+}
