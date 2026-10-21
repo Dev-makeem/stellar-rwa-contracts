@@ -1,4 +1,4 @@
-.PHONY: build test coverage fmt fmt-check clean deploy interface-specs
+.PHONY: build test coverage fmt fmt-check clean deploy interface-specs update-interface-specs check-interface-specs
 
 # Build all contracts to wasm.
 build:
@@ -42,3 +42,14 @@ interface-specs: build
 		wasm=target/wasm32v1-none/release/$$wasm_contract.wasm; \
 		stellar contract info interface --wasm "$$wasm" --output json > target/interface-specs/$$contract.json; \
 	done
+
+# Regenerate the committed interface specs in specs/interface/ after a public
+# function is added, removed, or changed. Commit the result with the code change.
+update-interface-specs: interface-specs
+	rm -rf specs/interface
+	mkdir -p specs/interface
+	cp target/interface-specs/*.json specs/interface/
+
+# Fail if the committed interface specs no longer match the built contracts.
+check-interface-specs: interface-specs
+	diff -ru specs/interface target/interface-specs

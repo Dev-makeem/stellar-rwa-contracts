@@ -155,8 +155,11 @@ jobs:
             target
           key: ${{ runner.os }}-specs-${{ hashFiles('**/Cargo.lock') }}
 
-      - name: Emit interface specs
-        run: make interface-specs
+      # Fails if the committed specs in specs/interface/ are stale, i.e. a public
+      # contract function changed without regenerating them with
+      # `make update-interface-specs`.
+      - name: Check committed interface specs are up to date
+        run: make check-interface-specs
 
       - name: Upload interface specs
         uses: actions/upload-artifact@v4
