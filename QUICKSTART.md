@@ -106,7 +106,30 @@ stellar contract invoke \
   --amount 1000
 ```
 
-Done! Asset deployed, minted, and transferred on testnet.
+### 6. Hand the asset-token admin role to Alice
+
+Admin changes are two-step: the current admin proposes a successor, and the
+successor accepts. The role does not move until acceptance, and after this
+step `rwa-admin` no longer administers the asset token.
+
+```bash
+stellar contract invoke \
+  --id "$ASSET_ID" \
+  --source rwa-admin \
+  --network testnet \
+  -- propose_admin \
+  --admin "$ADMIN_ADDR" \
+  --new_admin "$ALICE_ADDR"
+
+stellar contract invoke \
+  --id "$ASSET_ID" \
+  --source "$ALICE_ADDR" \
+  --network testnet \
+  -- accept_admin \
+  --new_admin "$ALICE_ADDR"
+```
+
+Done! Asset deployed, minted, transferred, and admin handed over on testnet.
 
 ## Keeping the quickstart accurate
 

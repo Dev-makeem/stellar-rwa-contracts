@@ -6,6 +6,8 @@
 #   1. Every script path mentioned in QUICKSTART.md exists in the repo.
 #   2. The wasm target used in build commands matches rust-toolchain.toml.
 #   3. The CLI tool used is "stellar" (not "soroban-cli").
+#   4. The admin handover flow (propose_admin -> accept_admin) is documented
+#      and both functions exist on the asset-token contract.
 #
 # Run from the repository root:
 #   ./scripts/check_quickstart.sh
@@ -17,6 +19,7 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DOC="$REPO_ROOT/QUICKSTART.md"
 TOOLCHAIN="$REPO_ROOT/rust-toolchain.toml"
+ASSET_TOKEN_LIB="$REPO_ROOT/contracts/asset-token/src/lib.rs"
 ERRORS=0
 
 red()   { printf "\033[31m%s\033[0m\n" "$*"; }
@@ -43,6 +46,18 @@ if grep -q 'soroban-cli\|soroban contract\b' "$DOC"; then
   red "FAIL: $DOC references 'soroban-cli' or 'soroban contract'; use the 'stellar' CLI (>= 22) instead."
   ERRORS=$((ERRORS + 1))
 fi
+
+# 4. Verify the admin handover flow is documented and implemented by the contract.
+for fn_name in propose_admin accept_admin; do
+  if ! grep -qP -- "-- ${fn_name}\b" "$DOC"; then
+    red "FAIL: $DOC does not document the admin handover step '$fn_name'."
+    ERRORS=$((ERRORS + 1))
+  fi
+  if ! grep -q "pub fn ${fn_name}(" "$ASSET_TOKEN_LIB"; then
+    red "FAIL: $ASSET_TOKEN_LIB does not define '$fn_name'."
+    ERRORS=$((ERRORS + 1))
+  fi
+done
 
 if [ "$ERRORS" -eq 0 ]; then
   green "OK: QUICKSTART.md checks passed."
