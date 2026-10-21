@@ -1170,6 +1170,9 @@ fn panic_err(env: &Env, error: Error) -> ! {
     soroban_sdk::panic_with_error!(env, error)
 }
 
+#[cfg(test)]
+mod test_makeem_approve;
+
 /// Reject strings that are empty or exceed `max_len` bytes (issue #46).
 fn check_str(env: &Env, s: &String, min_len: u32, max_len: u32) {
     let len = s.len();
