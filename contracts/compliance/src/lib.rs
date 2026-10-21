@@ -1255,6 +1255,10 @@ impl ComplianceContract {
 
     /// Return the ledger sequence at which `holder` first acquired tokens,
     /// if that has been recorded via `record_acquisition`.
+    ///
+    /// The value is write-once: later calls to `record_acquisition` for the
+    /// same holder (e.g. a top-up transfer) do not overwrite it, so the
+    /// returned ledger is always the earliest acquisition.
     pub fn get_first_acquired_ledger(env: Env, holder: Address) -> Option<u64> {
         env.storage()
             .persistent()
