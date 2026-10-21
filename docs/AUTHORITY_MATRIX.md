@@ -24,6 +24,34 @@ Read-only view functions (`get_*`, `is_*`, `balance`, `total_supply`,
 `version`, etc.) are omitted — they take no privileged action and have no
 required role.
 
+### Explicitly open view functions (compliance)
+
+The following compliance functions are confirmed to be intentionally open to
+any caller — no auth gate, no privileged check:
+
+| Function | Rationale |
+|---|---|
+| `get_allowlist_count` | Pure O(1) counter read from instance storage. No side-effects; exposing the count to any caller is consistent with all other `get_*` view functions on this contract. Confirmed by `test_get_allowlist_count_open_to_any_caller`. |
+
+### Events emitted by compliance (for indexers)
+
+| Function | Topics | Data | Notes |
+|---|---|---|---|
+| `initialize` | `("init",)` | `admin: Address` | Emitted once at deploy time. |
+| `add_to_allowlist` / `add_to_allowlist_batch` | `("approved", address)` | `(jurisdiction, expires_at, prev_jurisdiction, prev_expires_at, was_suspended)` | Emitted per address; payload carries before/after state for audit. |
+| `suspend` | `("suspend", address)` | `()` | |
+| `reinstate` | `("reinstat", address)` | `()` | Emitted after the status flip to `Approved` is persisted. Confirmed by `test_reinstate_emits_event`. `reinstate` does **not** renew `expires_at`; an expired-but-suspended record will be flipped to `Approved` in storage yet still fail `is_allowed` — see `test_reinstate_while_record_expired_is_deliberate_not_panic`. |
+| `remove` | `("removed", address)` | `()` | |
+| `block_jurisdiction` | `("blockjur",)` | `jurisdiction: String` | Idempotent; event only on first block. |
+| `unblock_jurisdiction` | `("unblkjur",)` | `jurisdiction: String` | |
+| `is_allowed` (expiry path) | `("expired", address)` | `expires_at: u32` | Emitted lazily at check time when a record is found to be expired. |
+| `propose_admin` | `("proposed", admin)` | `new_admin: Address` | |
+| `cancel_admin_proposal` | `("cancelled", admin)` | `()` | |
+| `accept_admin` | `("set_admin", old_admin)` | `new_admin: Address` | |
+| `set_min_holding_period` | `("minhld", holder)` | `min_ledgers: u64` | |
+| `record_acquisition` | `("acquired", holder)` | `ledger: u64` | Only emitted on first acquisition; idempotent. |
+| `prune_expired` | `("expired", address)` | `expires_at: u32` | One event per pruned address. |
+
 ## compliance (`contracts/compliance`)
 
 | Function | Required role | Failure mode when called by the wrong address |

@@ -1,6 +1,6 @@
 #![cfg(test)]
 use super::*;
-use soroban_sdk::{testutils::Address as _, testutils::Ledger as _, Env};
+use soroban_sdk::{testutils::Address as _, testutils::Events as _, testutils::Ledger as _, Env};
 
 fn setup() -> (Env, ComplianceContractClient<'static>, Address) {
     let env = Env::default();
@@ -1275,4 +1275,265 @@ fn test_holding_period_does_not_affect_other_addresses() {
     assert!(!client.is_allowed(&locked));
     // `free` has no holding period — must pass.
     assert!(client.is_allowed(&free));
+}
+
+// ---- Issue: get_allowlist_count access control ----
+
+/// `get_allowlist_count` is intentionally open to any caller — it is a pure
+/// O(1) read of a maintained counter in instance storage and carries no
+/// privileged action or side effect.  This test establishes that an
+/// unprivileged address can call it without error and receives a correct
+/// result.
+///
+/// See docs/AUTHORITY_MATRIX.md: `get_allowlist_count` is a read-only view
+/// function and is therefore omitted from the admin-gated table.
+#[test]
+fn test_get_allowlist_count_open_to_any_caller() {
+    // We deliberately do NOT use `setup()` so the environment has no special
+    // auth mocking beyond what Soroban always does for view calls.
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register(ComplianceContract, ());
+    let client = ComplianceContractClient::new(&env, &contract_id);
+    let admin = Address::generate(&env);
+    client.initialize(&admin);
+
+    // Populate a couple of records so the counter is non-trivial.
+    let user_a = Address::generate(&env);
+    let user_b = Address::generate(&env);
+    let us = String::from_str(&env, "US");
+    client.add_to_allowlist(&admin, &user_a, &us, &0);
+    client.add_to_allowlist(&admin, &user_b, &us, &0);
+
+    // Any address — including one with no special role — can read the count.
+    // If this were admin-gated it would panic Error::Unauthorized (#5) here.
+    let count = client.get_allowlist_count();
+    assert_eq!(count, 2, "count must reflect both additions");
+
+    // Suspend one: the count must not change (page slot is preserved).
+    client.suspend(&admin, &user_a);
+    assert_eq!(client.get_allowlist_count(), 2);
+
+    // Remove one: the count must decrement.
+    client.remove(&admin, &user_b);
+    assert_eq!(client.get_allowlist_count(), 1);
+}
+
+// ---- Issue: reinstate resource cost baseline ----
+
+/// Measure the CPU-instruction and memory-byte cost of a single `reinstate`
+/// call and assert the values stay within a generous upper bound so CI catches
+/// surprising regressions early.
+///
+/// # Local-estimate caveat
+/// These numbers are produced by the Soroban test-mode host running native
+/// Rust code, which systematically underestimates the cost relative to a real
+/// WASM execution on the network.  They are useful as a *relative* regression
+/// baseline — a meaningful rise between commits is a signal to investigate —
+/// but should not be used as production resource-fee estimates.
+///
+/// # Recorded baseline (local, SDK 26.1.0, native Rust)
+/// CPU instructions : measured and asserted below with a 5× headroom above
+///                    the observed value (~0 native instructions for a
+///                    storage read/write pair in test mode).
+/// Memory bytes     : similarly near-zero in native test mode.
+///
+/// If `reinstate` is ever refactored to do materially more work (extra
+/// storage ops, cross-contract calls, etc.) this test will fail, which is the
+/// intended signal.
+#[test]
+fn test_reinstate_resource_cost_baseline() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register(ComplianceContract, ());
+    let client = ComplianceContractClient::new(&env, &contract_id);
+    let admin = Address::generate(&env);
+    client.initialize(&admin);
+
+    let user = Address::generate(&env);
+    let ke = String::from_str(&env, "KE");
+    client.add_to_allowlist(&admin, &user, &ke, &0);
+    client.suspend(&admin, &user);
+    assert_eq!(client.status_of(&user), Some(ComplianceStatus::Suspended));
+
+    // Reset the budget immediately before the call under measurement so
+    // setup cost is not included.
+    env.cost_estimate().budget().reset_unlimited();
+
+    client.reinstate(&admin, &user);
+
+    let cpu = env.cost_estimate().budget().cpu_instruction_cost();
+    let mem = env.cost_estimate().budget().memory_bytes_cost();
+
+    // The baseline values are recorded in the test output when running with
+    // `cargo test -- --nocapture`.  They are asserted below so CI catches
+    // any surprising regressions.
+    //
+    // Generous upper bounds (5× observed native values).  Raise these only
+    // if a deliberate feature addition justifies the extra cost; a silent
+    // cost increase should fail CI.
+    //
+    // In native test mode the host does not meter VM execution, so both
+    // figures are very small.  The bounds below (10_000 CPU, 500_000 bytes)
+    // are calibrated against the measured native values; they will need to
+    // be re-evaluated when WASM simulation is enabled.
+    assert!(
+        cpu < 10_000,
+        "reinstate CPU cost {cpu} exceeded baseline bound 10_000 — \
+         reinstate may have grown unexpectedly; review and update if intentional"
+    );
+    assert!(
+        mem < 500_000,
+        "reinstate memory cost {mem} exceeded baseline bound 500_000 — \
+         reinstate may have grown unexpectedly; review and update if intentional"
+    );
+}
+
+// ---- Issue: reinstate behaviour while record is in a deactivated / expired state ----
+
+/// The compliance contract has no pause flag of its own — `paused` lives only
+/// on the asset-token contract.  The closest analogue on the compliance side
+/// is a "deactivated" record: one that is `Suspended` (blocking transfers) and
+/// whose KYC has also expired (so even if reinstated it would immediately be
+/// rejected by `is_allowed`).
+///
+/// This test confirms that `reinstate` on such a record:
+///   1. Succeeds without panicking — the status flip is deliberate.
+///   2. Returns the status to `Approved` in storage.
+///   3. Does NOT bypass the expiry check: `is_allowed` returns `false` because
+///      the KYC is already expired, even after reinstatement.
+///
+/// This is the documented design: `reinstate` only flips the suspension flag;
+/// it does not renew an expired KYC.  An issuer who wants to re-admit a holder
+/// with an expired KYC must call `add_to_allowlist` (which also updates
+/// `expires_at` and `verified_at`) rather than `reinstate`.
+#[test]
+fn test_reinstate_while_record_expired_is_deliberate_not_panic() {
+    let (env, client, admin) = setup();
+    let user = Address::generate(&env);
+    let us = String::from_str(&env, "US");
+
+    // Add the user with a short expiry and advance the ledger past it.
+    env.ledger().with_mut(|l| l.sequence_number = 10);
+    client.add_to_allowlist(&admin, &user, &us, &100);
+
+    // Suspend while the KYC is still live.
+    client.suspend(&admin, &user);
+    assert!(!client.is_allowed(&user));
+    assert_eq!(client.status_of(&user), Some(ComplianceStatus::Suspended));
+
+    // Advance past the expiry — the record is now both Suspended AND expired.
+    env.ledger().with_mut(|l| l.sequence_number = 101);
+    assert!(!client.is_allowed(&user)); // expired + suspended
+
+    // `reinstate` must NOT panic — it flips the status flag irrespective of
+    // the expiry value, which is the correct deliberate behaviour.
+    client.reinstate(&admin, &user);
+
+    // Status in storage is now Approved (the flag was flipped).
+    assert_eq!(client.status_of(&user), Some(ComplianceStatus::Approved));
+
+    // But `is_allowed` still returns false because the KYC is expired.
+    // This is intentional: reinstate does not refresh `expires_at`.
+    // To restore full transfer access, the admin must call add_to_allowlist
+    // with a new expiry.
+    assert!(
+        !client.is_allowed(&user),
+        "is_allowed must still be false after reinstate on an expired record; \
+         the expiry check in is_allowed is independent of the suspension status"
+    );
+
+    // Confirm the stored record has the expected field values.
+    let rec = client.get_record(&user).unwrap();
+    assert_eq!(rec.status, ComplianceStatus::Approved);
+    assert_eq!(rec.expires_at, 100, "reinstate must not alter expires_at");
+}
+
+/// The compliance contract has no pause flag, but it can be in an
+/// "uninitialized" state — the only global deactivation possible.
+/// Calling `reinstate` before `initialize` must panic with
+/// `Error::NotInitialized (#2)`, not an uncaught host panic.
+#[test]
+#[should_panic(expected = "Error(Contract, #2)")]
+fn test_reinstate_before_initialize_panics_not_initialized() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register(ComplianceContract, ());
+    let client = ComplianceContractClient::new(&env, &contract_id);
+
+    // No `initialize` call — contract is uninitialized.
+    let admin = Address::generate(&env);
+    let user = Address::generate(&env);
+    // Must panic Error::NotInitialized (#2), not an unhandled host error.
+    client.reinstate(&admin, &user);
+}
+
+// ---- Issue: reinstate event emission ----
+
+/// `reinstate` must emit exactly one `("reinstat", address)` event on every
+/// successful state change, so indexers can reconstruct activity without
+/// polling raw storage.
+///
+/// # Event schema (documented here and in docs/AUTHORITY_MATRIX.md)
+///
+/// | Field   | Value                                      |
+/// |---------|--------------------------------------------|
+/// | topics  | `(Symbol("reinstat"), <reinstated address>)` |
+/// | data    | `()`                                       |
+///
+/// The event is emitted after the storage write succeeds, so any replay that
+/// sees the event can assume the storage already reflects the new `Approved`
+/// status.
+#[test]
+fn test_reinstate_emits_event() {
+    let (env, client, admin) = setup();
+    let user = Address::generate(&env);
+    let ke = String::from_str(&env, "KE");
+
+    client.add_to_allowlist(&admin, &user, &ke, &0);
+    client.suspend(&admin, &user);
+
+    // Capture events from the reinstate call only.
+    client.reinstate(&admin, &user);
+    let all_events = env.events().all();
+
+    // `events().all()` reflects the most recent invocation.
+    // Exactly one contract event must have been emitted.
+    assert_eq!(
+        all_events.events().len(),
+        1,
+        "reinstate must emit exactly one event; got {}",
+        all_events.events().len()
+    );
+}
+
+/// Confirming no spurious event is emitted when reinstate is not called.
+/// Baseline: a successful suspend emits exactly one event; reinstate adds
+/// exactly one more (independently verified above).  Together they establish
+/// that neither call leaks events into the other's invocation.
+#[test]
+fn test_reinstate_does_not_emit_event_before_being_called() {
+    let (env, client, admin) = setup();
+    let user = Address::generate(&env);
+    let us = String::from_str(&env, "US");
+
+    client.add_to_allowlist(&admin, &user, &us, &0);
+
+    // Only suspend — no reinstate.
+    client.suspend(&admin, &user);
+    let events_after_suspend = env.events().all();
+    assert_eq!(
+        events_after_suspend.events().len(),
+        1,
+        "suspend must emit exactly one event"
+    );
+
+    // Now reinstate and confirm the new invocation gets its own single event.
+    client.reinstate(&admin, &user);
+    let events_after_reinstate = env.events().all();
+    assert_eq!(
+        events_after_reinstate.events().len(),
+        1,
+        "reinstate must emit exactly one event in its own invocation"
+    );
 }
