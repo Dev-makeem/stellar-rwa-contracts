@@ -340,9 +340,17 @@ impl AssetTokenContract {
     /// call. Each `(recipient, amount)` pair is checked individually; if any
     /// entry fails, the entire call reverts and no balances move.
     ///
+    /// ## Atomicity: all-or-nothing, including a failing middle entry
+    /// Entries are processed in order, but a failure at any position (first,
+    /// middle or last) reverts the whole invocation. Earlier entries that
+    /// already succeeded are not kept, and no `transfer` event from the batch
+    /// is observable. Callers never receive a partially applied batch and
+    /// cannot skip a failing recipient; to exclude one, remove it and resubmit.
+    ///
     /// This is the batch counterpart to [`Self::transfer`] and follows the same
-    /// established pattern as `mint_batch`. Semantics are identical to calling
-    /// `transfer` once per entry, with three deliberate differences:
+    /// established pattern as `mint_batch`. Apart from the all-or-nothing
+    /// guarantee above, semantics match calling `transfer` once per entry, with
+    /// the following deliberate policies:
     ///
     /// ## Deliberate policy: the sender is gated once, not per entry
     /// The sender is the same `from` for every entry, so `require_auth`,
