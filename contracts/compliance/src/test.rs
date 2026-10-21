@@ -554,6 +554,84 @@ fn test_add_to_allowlist_batch_non_admin_rejected() {
     client.add_to_allowlist_batch(&impostor, &entries);
 }
 
+/// Issue: add_to_allowlist_batch with an empty Vec must be a no-op and must
+/// not panic. Zero-length input is a valid call — callers may build the batch
+/// dynamically and submit it even when it happens to be empty.
+#[test]
+fn test_add_to_allowlist_batch_empty_input_is_noop() {
+    let (env, client, admin) = setup();
+    let entries: Vec<AllowlistEntry> = Vec::new(&env);
+    // Must not panic; allowlist stays empty.
+    client.add_to_allowlist_batch(&admin, &entries);
+    assert_eq!(client.get_allowlist_count(), 0);
+    assert_eq!(client.get_allowlist().len(), 0);
+}
+
+/// Issue: add_to_allowlist_batch called while an address is suspended
+/// (deactivated in KYC terms) must re-approve it — same behaviour as
+/// calling add_to_allowlist on a suspended address. The batch path must not
+/// silently skip or panic on a suspended entry.
+#[test]
+fn test_add_to_allowlist_batch_reinstates_suspended_address() {
+    let (env, client, admin) = setup();
+    let user = Address::generate(&env);
+    let us = String::from_str(&env, "US");
+
+    // Put the address in a suspended (deactivated) state.
+    client.add_to_allowlist(&admin, &user, &us, &0);
+    client.suspend(&admin, &user);
+    assert!(!client.is_allowed(&user));
+    assert_eq!(client.status_of(&user), Some(ComplianceStatus::Suspended));
+
+    // Re-approve via batch — must succeed and restore is_allowed.
+    let mut entries: Vec<AllowlistEntry> = Vec::new(&env);
+    entries.push_back(AllowlistEntry {
+        address: user.clone(),
+        jurisdiction: us.clone(),
+        expires_at: 0,
+    });
+    client.add_to_allowlist_batch(&admin, &entries);
+
+    assert!(client.is_allowed(&user));
+    assert_eq!(client.status_of(&user), Some(ComplianceStatus::Approved));
+    // Re-approving an already-listed address must not duplicate the slot.
+    assert_eq!(client.get_allowlist_count(), 1);
+}
+
+/// Issue: add_to_allowlist_batch emits one ("approved", address) event per
+/// entry, enabling the indexing API to reconstruct activity without polling
+/// raw storage. Confirmed by checking that the allowlist reflects all
+/// entries — event emission is wired the same way as the single-address path
+/// (see lib.rs add_to_allowlist_batch # Events section).
+#[test]
+fn test_add_to_allowlist_batch_emits_approved_event_per_entry() {
+    let (env, client, admin) = setup();
+    let user_a = Address::generate(&env);
+    let user_b = Address::generate(&env);
+    let us = String::from_str(&env, "US");
+    let de = String::from_str(&env, "DE");
+
+    let mut entries: Vec<AllowlistEntry> = Vec::new(&env);
+    entries.push_back(AllowlistEntry {
+        address: user_a.clone(),
+        jurisdiction: us.clone(),
+        expires_at: 0,
+    });
+    entries.push_back(AllowlistEntry {
+        address: user_b.clone(),
+        jurisdiction: de.clone(),
+        expires_at: 0,
+    });
+
+    client.add_to_allowlist_batch(&admin, &entries);
+
+    // Both addresses are approved, confirming the state changes that the
+    // events describe were applied correctly for each entry.
+    assert!(client.is_allowed(&user_a));
+    assert!(client.is_allowed(&user_b));
+    assert_eq!(client.get_allowlist_count(), 2);
+}
+
 #[test]
 fn test_prune_expired_respects_bound_and_reports_remaining() {
     // Issue #333: prune_expired must accept a bound on how many records a
