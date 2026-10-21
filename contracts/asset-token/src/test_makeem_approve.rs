@@ -81,3 +81,43 @@ fn negative_amount_rejected() {
     let spender = Address::generate(&s.env);
     assert!(s.token.try_approve(&s.admin, &spender, &-1, &1_000).is_err());
 }
+
+// ---- #533: event emission ----
+// `events().all()` reflects only the most recent invocation, so each check
+// reads it immediately after the `approve` call.
+
+#[test]
+fn approve_emits_one_event() {
+    let s = setup();
+    let spender = Address::generate(&s.env);
+    let exp = s.env.ledger().sequence() + 100;
+    s.token.approve(&s.admin, &spender, &250, &exp);
+    assert_eq!(s.env.events().all().events().len(), 1);
+}
+
+#[test]
+fn zero_amount_approve_still_emits_event() {
+    let s = setup();
+    let spender = Address::generate(&s.env);
+    s.token.approve(&s.admin, &spender, &0, &0);
+    assert_eq!(s.env.events().all().events().len(), 1);
+}
+
+#[test]
+fn overwriting_approve_emits_event_each_time() {
+    let s = setup();
+    let spender = Address::generate(&s.env);
+    let exp = s.env.ledger().sequence() + 100;
+    s.token.approve(&s.admin, &spender, &100, &exp);
+    assert_eq!(s.env.events().all().events().len(), 1);
+    s.token.approve(&s.admin, &spender, &200, &exp);
+    assert_eq!(s.env.events().all().events().len(), 1);
+}
+
+#[test]
+fn rejected_approve_emits_no_event() {
+    let s = setup();
+    let spender = Address::generate(&s.env);
+    assert!(s.token.try_approve(&s.admin, &spender, &-1, &1_000).is_err());
+    assert_eq!(s.env.events().all().events().len(), 0);
+}
