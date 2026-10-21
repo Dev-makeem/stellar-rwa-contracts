@@ -62,7 +62,9 @@ and reports total value locked (TVL).
 - `update_valuation(admin, asset_id, new_valuation)` — admin auth; updates
   `AssetEntry.valuation`, adjusts TVL if the asset is `active`, and emits a
   `valuation` event (see Events below) so indexers observe the change without
-  polling. `InvalidValuation (#5)` if negative; `AssetNotFound (#4)`.
+  polling. `InvalidValuation (#5)` if negative; `AssetNotFound (#4)`. This does
+  **not** update the asset-token contract's `valuation`; the two are independent
+  and must be updated separately (see `docs/valuation-convention.md`).
 - `total_value_locked() -> i128` — sum of `valuation` over active assets.
   O(1): maintained as a running total updated on register, deactivate and
   reactivate, never recomputed by iterating the registry.

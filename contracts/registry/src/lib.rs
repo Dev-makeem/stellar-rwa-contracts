@@ -157,8 +157,8 @@ impl RegistryContract {
     /// time.  It is independent from any valuation stored by the token
     /// contract: the registry has no callback or synchronization hook when a
     /// token updates its metadata valuation.  Divergence is therefore possible
-    /// and callers must verify both records; the current registry API has no
-    /// valuation-update entrypoint.
+    /// and callers must verify both records; use [`Self::update_valuation`]
+    /// to bring the registry entry back in line.
     ///
     /// Duplicate registration of the same `token_contract` address is
     /// rejected (issue #308): re-registering an existing token would
@@ -679,8 +679,10 @@ impl RegistryContract {
     /// Maintained incrementally on register/deactivate/reactivate/update, so
     /// this is a single storage read regardless of registry size.
     ///
-    /// Each asset entry's valuation is a point-in-time snapshot taken at
-    /// registration.  The asset-token contract's `update_valuation` bounds
+    /// Each asset entry's valuation is a snapshot taken at registration and
+    /// changed only through this contract's `update_valuation`; it is not
+    /// synced from the asset-token contract.  The asset-token contract's
+    /// `update_valuation` bounds
     /// any single change to `MAX_VALUATION_CHANGE_BPS` (50%) of the previous
     /// value precisely because a runaway or mistyped valuation there would
     /// otherwise skew this TVL figure.
