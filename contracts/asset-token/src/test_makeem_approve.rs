@@ -3,9 +3,8 @@
 use super::*;
 use compliance::{ComplianceContract, ComplianceContractClient};
 use soroban_sdk::{
-    symbol_short,
     testutils::{Address as _, Events, Ledger},
-    Address, Env, IntoVal, String,
+    Address, Env, String,
 };
 
 struct S {
@@ -120,4 +119,37 @@ fn rejected_approve_emits_no_event() {
     let spender = Address::generate(&s.env);
     assert!(s.token.try_approve(&s.admin, &spender, &-1, &1_000).is_err());
     assert_eq!(s.env.events().all().events().len(), 0);
+}
+
+// ---- #534: resource cost ----
+// Generous ceiling guards against order-of-magnitude regressions without
+// being brittle across SDK versions. Observed cost is printed with
+// `cargo test -- --nocapture` so a baseline can be recorded.
+
+#[test]
+fn approve_cpu_cost_within_baseline() {
+    let s = setup();
+    let spender = Address::generate(&s.env);
+    let exp = s.env.ledger().sequence() + 100;
+    s.env.cost_estimate().budget().reset_default();
+    s.token.approve(&s.admin, &spender, &250, &exp);
+    let cpu = s.env.cost_estimate().budget().cpu_instruction_cost();
+    let mem = s.env.cost_estimate().budget().memory_bytes_cost();
+    std::println!("approve cost: cpu={cpu} mem={mem}");
+    assert!(cpu < 5_000_000, "approve cpu cost unexpectedly high: {cpu}");
+    assert!(mem < 1_000_000, "approve memory cost unexpectedly high: {mem}");
+}
+
+#[test]
+fn approve_overwrite_cost_not_greater_than_double_first() {
+    let s = setup();
+    let spender = Address::generate(&s.env);
+    let exp = s.env.ledger().sequence() + 100;
+    s.env.cost_estimate().budget().reset_default();
+    s.token.approve(&s.admin, &spender, &1, &exp);
+    let first = s.env.cost_estimate().budget().cpu_instruction_cost();
+    s.env.cost_estimate().budget().reset_default();
+    s.token.approve(&s.admin, &spender, &2, &exp);
+    let second = s.env.cost_estimate().budget().cpu_instruction_cost();
+    assert!(second <= first * 2, "overwrite cost {second} vs first {first}");
 }
